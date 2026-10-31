@@ -1,0 +1,54 @@
+name: Build from zip
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ekstrak tinta-project.zip
+        run: unzip -o tinta-project.zip
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Android SDK / NDK
+        run: |
+          SDKM="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          yes | "$SDKM" --licenses > /dev/null || true
+          "$SDKM" "platforms;android-33" "build-tools;33.0.2"
+          echo "ANDROID_NDK_ROOT=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$ANDROID_NDK_LATEST_HOME" >> "$GITHUB_ENV"
+
+      - name: Install cargo-apk
+        run: cargo install cargo-apk --version 0.10.0 --locked
+
+      - name: Debug keystore
+        run: |
+          keytool -genkey -v -keystore "$RUNNER_TEMP/debug.keystore" \
+            -storepass android -keypass android -alias androiddebugkey \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          echo "CARGO_APK_RELEASE_KEYSTORE=$RUNNER_TEMP/debug.keystore" >> "$GITHUB_ENV"
+          echo "CARGO_APK_RELEASE_KEYSTORE_PASSWORD=android" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        run: cargo apk build --release
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tinta-apk
+          path: target/release/apk/*.apk
